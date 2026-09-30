@@ -1,0 +1,126 @@
+const mongoose = require('mongoose');
+
+const leaveRequestSchema = new mongoose.Schema(
+  {
+    userId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      required: [true, 'Người gửi đơn (userId) là bắt buộc'],
+    },
+    type: {
+      type: String,
+      enum: {
+        values: ['nghi_phep', 'day_bu', 'doi_ca'],
+        message: 'Loại đơn không hợp lệ',
+      },
+      required: [true, 'Loại đơn (nghi_phep, day_bu, doi_ca) là bắt buộc'],
+    },
+    reason: {
+      type: String,
+      required: [true, 'Lý do xin nghỉ/đổi ca là bắt buộc'],
+      trim: true,
+      minlength: [5, 'Lý do phải có ít nhất 5 ký tự'],
+      maxlength: [500, 'Lý do không được vượt quá 500 ký tự'],
+    },
+    startDate: {
+      type: Date,
+      required: [true, 'Ngày bắt đầu áp dụng (startDate) là bắt buộc'],
+    },
+    endDate: {
+      type: Date,
+      required: [true, 'Ngày kết thúc áp dụng (endDate) là bắt buộc'],
+    },
+    attachmentUrl: {
+      type: String,
+      default: null,
+      trim: true,
+    },
+    status: {
+      type: String,
+      enum: ['PENDING', 'APPROVED', 'REJECTED'],
+      default: 'PENDING',
+      required: true,
+    },
+    approvedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+    },
+    approvalNote: {
+      type: String,
+      default: '',
+      trim: true,
+      maxlength: [500, 'Ghi chú duyệt không được vượt quá 500 ký tự'],
+    },
+    rejectionReason: {
+      type: String,
+      default: null,
+      trim: true,
+      maxlength: [500, 'Lý do từ chối không được vượt quá 500 ký tự'],
+      validate: {
+        validator: function (val) {
+          if (this.status === 'REJECTED' && (!val || !val.trim())) return false;
+          return true;
+        },
+        message: 'Lý do từ chối là bắt buộc khi đơn bị từ chối (REJECTED)',
+      },
+    },
+  },
+  {
+    timestamps: true,
+    collection: 'leave_requests',
+    toJSON: {
+      transform: (doc, ret) => {
+        if (typeof ret.attachmentUrl === 'string') {
+          if (ret.attachmentUrl.startsWith('http://chamcongdh.io.vn')) {
+            ret.attachmentUrl = ret.attachmentUrl.replace('http://chamcongdh.io.vn', 'https://chamcongdh.io.vn');
+          }
+          if (ret.attachmentUrl.startsWith('/uploads/')) {
+            ret.attachmentUrl = `/api${ret.attachmentUrl}`;
+          } else if (ret.attachmentUrl.includes('chamcongdh.io.vn/uploads/')) {
+            ret.attachmentUrl = ret.attachmentUrl.replace('chamcongdh.io.vn/uploads/', 'chamcongdh.io.vn/api/uploads/');
+          }
+        }
+        return ret;
+      },
+    },
+    toObject: {
+      transform: (doc, ret) => {
+        if (typeof ret.attachmentUrl === 'string') {
+          if (ret.attachmentUrl.startsWith('http://chamcongdh.io.vn')) {
+            ret.attachmentUrl = ret.attachmentUrl.replace('http://chamcongdh.io.vn', 'https://chamcongdh.io.vn');
+          }
+          if (ret.attachmentUrl.startsWith('/uploads/')) {
+            ret.attachmentUrl = `/api${ret.attachmentUrl}`;
+          } else if (ret.attachmentUrl.includes('chamcongdh.io.vn/uploads/')) {
+            ret.attachmentUrl = ret.attachmentUrl.replace('chamcongdh.io.vn/uploads/', 'chamcongdh.io.vn/api/uploads/');
+          }
+        }
+        return ret;
+      },
+    },
+  }
+);
+
+// Indexes tăng tốc truy vấn lọc, kiểm tra trùng lặp và aggregate số dư ngày phép (chuẩn ESR)
+leaveRequestSchema.index({ userId: 1, type: 1, status: 1, startDate: 1, endDate: 1 });
+leaveRequestSchema.index({ userId: 1, status: 1, createdAt: -1 });
+leaveRequestSchema.index({ status: 1, createdAt: -1 });
+
+// Khóa chống Race Condition: Ngăn chặn tạo 2 đơn trùng lặp thời gian cho cùng 1 user cấp CSDL
+leaveRequestSchema.index(
+  { userId: 1, startDate: 1, endDate: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { status: { $in: ['PENDING', 'APPROVED'] } },
+    name: 'unique_active_leave_range',
+  }
+);
+
+leaveRequestSchema.pre('validate', function () {
+  if (this.startDate && this.endDate && this.startDate > this.endDate) {
+    this.invalidate('endDate', 'Ngày kết thúc phải lớn hơn hoặc bằng ngày bắt đầu');
+  }
+});
+
+module.exports = mongoose.model('LeaveRequest', leaveRequestSchema, 'leave_requests');

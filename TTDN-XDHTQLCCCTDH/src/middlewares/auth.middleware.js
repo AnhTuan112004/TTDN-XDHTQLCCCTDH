@@ -1,0 +1,109 @@
+const jwt = require('jsonwebtoken');
+const TokenBlacklist = require('../models/tokenBlacklist.model');
+const User = require('../models/user.model');
+const { sendError } = require('../utils/responseHandler');
+
+/**
+ * Middleware xác thực token JWT người dùng (Kiểm tra format, Blacklist, Expiration, trạng thái User)
+ */
+const verifyToken = async (req, res, next) => {
+  try {
+    const authHeader = req.headers.authorization;
+
+    if (!authHeader) {
+      return sendError(res, 'Truy cập bị từ chối. Token không tồn tại.', null, 401);
+    }
+
+    // Chấp nhận cả "Bearer <token>" và token thô; xử lý tối đa 2 lần tiền tố Bearer
+    const token = authHeader
+      .replace(/^Bearer\s+/i, '')
+      .replace(/^Bearer\s+/i, '')
+      .trim();
+
+    if (!token) {
+      return sendError(res, 'Truy cập bị từ chối. Định dạng token không hợp lệ.', null, 401);
+    }
+
+    // 1. Kiểm tra xem Access Token có nằm trong danh sách Blacklist (đã logout) hay không
+    const isBlacklisted = await TokenBlacklist.findOne({ token });
+    if (isBlacklisted) {
+      return sendError(res, 'Token đã bị vô hiệu hóa do đăng xuất. Vui lòng đăng nhập lại.', null, 401);
+    }
+
+    // 2. Xác thực tính hợp lệ và thời hạn của Token
+    if (!process.env.JWT_SECRET) {
+      console.error('[Auth Error] Biến môi trường JWT_SECRET chưa được cấu hình.');
+      return sendError(res, 'Lỗi cấu hình hệ thống xác thực máy chủ.', null, 500);
+    }
+
+    let decoded;
+    try {
+      decoded = jwt.verify(token, process.env.JWT_SECRET);
+    } catch (err) {
+      if (err.name === 'TokenExpiredError') {
+        return sendError(res, 'Token đã hết hạn. Vui lòng làm mới token hoặc đăng nhập lại.', null, 401);
+      }
+      return sendError(res, 'Token không hợp lệ hoặc đã bị giả mạo.', null, 401);
+    }
+
+    // 3. Kiểm tra người dùng có còn tồn tại và còn hoạt động hay không
+    const user = await User.findById(decoded.id).select('role departmentId isActive passwordChangedAt');
+    if (!user) {
+      return sendError(res, 'Người dùng không tồn tại trên hệ thống.', null, 401);
+    }
+    if (!user.isActive) {
+      return sendError(res, 'Tài khoản của bạn đã bị vô hiệu hóa.', null, 403);
+    }
+
+    // 4. Thu hồi Token nếu mật khẩu đã bị thay đổi sau thời điểm cấp Token (Server-side Token Revocation)
+    if (user.passwordChangedAt) {
+      const changedTimestamp = parseInt(user.passwordChangedAt.getTime() / 1000, 10);
+      if (decoded.iat && decoded.iat < changedTimestamp) {
+        return sendError(
+          res,
+          'Phiên đăng nhập đã hết hiệu lực do mật khẩu đã được thay đổi. Vui lòng đăng nhập lại.',
+          null,
+          401,
+          'TOKEN_EXPIRED_PASSWORD_CHANGED'
+        );
+      }
+    }
+
+    req.user = {
+      id: user._id.toString(),
+      role: user.role,
+      departmentId: user.departmentId ? user.departmentId.toString() : null,
+      email: decoded.email,
+    };
+    req.token = token;
+
+    next();
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Middleware phân quyền người dùng (Role-Based Access Control - RBAC)
+ * Hỗ trợ truyền dạng mảng: verifyRole(['admin', 'truongkhoa'])
+ * hoặc danh sách đối số: verifyRole('admin', 'truongkhoa')
+ * @param {string[]|...string} roles Các vai trò được phép: 'admin', 'truongkhoa', 'giangvien', 'nhanvien'
+ */
+const verifyRole = (...roles) => {
+  const allowedRoles = Array.isArray(roles[0]) ? roles[0] : roles;
+  return (req, res, next) => {
+    if (!req.user || !allowedRoles.includes(req.user.role)) {
+      return sendError(res, 'Bạn không có quyền thực hiện hành động này.', null, 403);
+    }
+    next();
+  };
+};
+
+// Alias hỗ trợ tương thích ngược
+const authorizeRoles = verifyRole;
+
+module.exports = {
+  verifyToken,
+  verifyRole,
+  authorizeRoles,
+};

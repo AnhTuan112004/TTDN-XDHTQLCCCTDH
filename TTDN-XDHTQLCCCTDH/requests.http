@@ -1,0 +1,568 @@
+### ==============================================================================
+### HỆ THỐNG QUẢN LÝ CHẤM CÔNG TRƯỜNG ĐẠI HỌC - REST CLIENT SPECIFICATION
+### Dùng trực tiếp trên VS Code với Extension "REST Client" hoặc "Thunder Client"
+### ==============================================================================
+
+@baseUrl = http://localhost:5000/api
+
+# CÁC BIẾN ID MẪU TỪ DỮ LIỆU ĐÃ SEED (CÓ THỂ DÙNG NGAY)
+@deptId = 6a9d57378cf3a6165de25dd1
+@userId = 6a9d57378cf3a6165de25dd8
+@shiftId = 6a9d57378cf3a6165de25ddc
+@scheduleId = 6a9d57378cf3a6165de25de0
+@leaveId = 6a9d57378cf3a6165de25dea
+@attendanceId = 6a9d57378cf3a6165de25deb
+
+# Token tự động lấy từ request login gần nhất (bấm Send Request ở mục 2 bên dưới)
+@token = {{loginAdmin.response.body.data.token}}
+@refreshToken = {{loginAdmin.response.body.data.refreshToken}}
+
+### ------------------------------------------------------------------------------
+### 3.8 HẠ TẦNG KỸ THUẬT
+### ------------------------------------------------------------------------------
+
+### 1. Health Check (Kiểm tra server và 8 Collections)
+GET {{baseUrl}}/health HTTP/1.1
+
+### ------------------------------------------------------------------------------
+### 3.1 AUTH & USER (TV A)
+### ------------------------------------------------------------------------------
+
+### 2. Đăng nhập Admin (Lưu ý: Phải dùng POST, không dùng GET)
+# @name loginAdmin
+POST {{baseUrl}}/auth/login HTTP/1.1
+Content-Type: application/json
+
+{
+  "email": "daihocdtd@gmail.com",
+  "password": "password123"
+}
+
+### 2b. Đăng nhập Trưởng Khoa CNTT
+# @name loginDean
+POST {{baseUrl}}/auth/login HTTP/1.1
+Content-Type: application/json
+
+{
+  "email": "truongkhoa.cntt@university.edu.vn",
+  "password": "password123"
+}
+
+### 2c. Đăng nhập Giảng viên (ThS. Linh)
+# @name loginLecturer
+POST {{baseUrl}}/auth/login HTTP/1.1
+Content-Type: application/json
+
+{
+  "email": "giangvien.linh@university.edu.vn",
+  "password": "password123"
+}
+
+### 2d. Đăng ký tài khoản mới (Gửi mã OTP 6 số qua Email - TTL 10 phút)
+POST {{baseUrl}}/auth/register HTTP/1.1
+Content-Type: application/json
+
+{
+  "fullName": "Giảng Viên Thử Nghiệm",
+  "email": "test.giangvien@university.edu.vn",
+  "password": "password123",
+  "role": "giangvien",
+  "departmentId": "{{deptId}}",
+  "annualLeaveQuota": 12
+}
+
+### 2e. Xác minh tài khoản bằng mã OTP (Nhập mã 6 chữ số nhận từ Email / Terminal)
+# Lưu ý: Nếu quá 10 phút, hệ thống tự động xóa tài khoản và yêu cầu đăng ký lại
+POST {{baseUrl}}/auth/verify-otp HTTP/1.1
+Content-Type: application/json
+
+{
+  "email": "test.giangvien@university.edu.vn",
+  "otp": "123456"
+}
+
+### 2f. Quên mật khẩu (Gửi mã OTP 6 số qua Email - TTL 10 phút)
+POST {{baseUrl}}/auth/forgot-password HTTP/1.1
+Content-Type: application/json
+
+{
+  "email": "test.giangvien@university.edu.vn"
+}
+
+### 2g. Đặt lại mật khẩu mới bằng mã OTP
+POST {{baseUrl}}/auth/reset-password HTTP/1.1
+Content-Type: application/json
+
+{
+  "email": "test.giangvien@university.edu.vn",
+  "otp": "123456",
+  "newPassword": "new_password123"
+}
+
+### 3. Lấy thông tin cá nhân hiện tại (/me)
+GET {{baseUrl}}/auth/me HTTP/1.1
+Authorization: Bearer {{token}}
+
+### 4. Cấp lại Access Token mới từ Refresh Token
+POST {{baseUrl}}/auth/refresh HTTP/1.1
+Content-Type: application/json
+
+{
+  "refreshToken": "{{refreshToken}}"
+}
+
+### 5. Đăng xuất (Vô hiệu hóa Refresh Token)
+POST {{baseUrl}}/auth/logout HTTP/1.1
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "refreshToken": "{{refreshToken}}"
+}
+
+### 6. Lấy danh sách người dùng (Users - có phân trang & lọc theo khoa)
+GET {{baseUrl}}/users?role=giangvien&page=1&limit=10 HTTP/1.1
+Authorization: Bearer {{token}}
+
+### 7. Xem chi tiết một người dùng
+GET {{baseUrl}}/users/{{userId}} HTTP/1.1
+Authorization: Bearer {{token}}
+
+### 8. Tạo mới tài khoản Giảng viên (Dành cho Admin)
+POST {{baseUrl}}/users HTTP/1.1
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "fullName": "ThS. Đặng Văn Mới",
+  "email": "dangvanmoi@university.edu.vn",
+  "password": "password123",
+  "role": "giangvien",
+  "departmentId": "{{deptId}}",
+  "annualLeaveQuota": 12
+}
+
+### 9. Cập nhật thông tin người dùng
+PUT {{baseUrl}}/users/{{userId}} HTTP/1.1
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "fullName": "TS. Trần Thị Bích (Cập nhật)",
+  "annualLeaveQuota": 14
+}
+
+### 10. Soft delete người dùng (isActive = false)
+DELETE {{baseUrl}}/users/{{userId}} HTTP/1.1
+Authorization: Bearer {{token}}
+
+### ------------------------------------------------------------------------------
+### 3.2 DEPARTMENT (TV A)
+### ------------------------------------------------------------------------------
+
+### 11. Danh sách Khoa/Bộ môn (Dạng cây phân cấp Trường > Khoa > Bộ môn)
+GET {{baseUrl}}/departments?tree=true HTTP/1.1
+Authorization: Bearer {{token}}
+
+### 12. Xem chi tiết một đơn vị
+GET {{baseUrl}}/departments/{{deptId}} HTTP/1.1
+Authorization: Bearer {{token}}
+
+### 13. Tạo đơn vị mới (Khoa / Bộ môn / Phòng ban)
+POST {{baseUrl}}/departments HTTP/1.1
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "name": "Bộ môn An Toàn Thông Tin",
+  "type": "bomon",
+  "parentId": "{{deptId}}",
+  "managerId": "{{userId}}",
+  "location": {
+    "lat": 21.028511,
+    "lng": 105.854167
+  }
+}
+
+### 14. Cập nhật đơn vị
+PUT {{baseUrl}}/departments/{{deptId}} HTTP/1.1
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "name": "Khoa Công Nghệ Thông Tin & Truyền Thông",
+  "managerId": "{{userId}}"
+}
+
+### 15. Xóa đơn vị (Kiểm tra ràng buộc nhân sự)
+DELETE {{baseUrl}}/departments/{{deptId}} HTTP/1.1
+Authorization: Bearer {{token}}
+
+### ------------------------------------------------------------------------------
+### 3.3 SCHEDULE & SHIFT CONFIG (TV B)
+### ------------------------------------------------------------------------------
+### 3.3 SCHEDULE & SHIFT CONFIG (TV B) - BỘ KIỂM THỬ HOÀN THIỆN NGÀY 5
+### ------------------------------------------------------------------------------
+
+### 16. Danh sách ca làm việc chuẩn (Shifts - Sắp xếp theo giờ bắt đầu)
+GET {{baseUrl}}/shifts HTTP/1.1
+Authorization: Bearer {{token}}
+
+### 17. [Case 1: Thành công] Tạo ca học mới
+# @name createNewShift
+POST {{baseUrl}}/shifts HTTP/1.1
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "name": "Ca Chiều Muộn (Tiết 7 - 9)",
+  "startTime": "15:00",
+  "endTime": "18:00",
+  "lateThresholdMinutes": 15
+}
+
+### 17b. [Case 2: Test Lỗi] Thử tạo ca trùng tên (Kỳ vọng: 409 Conflict, Mã SHIFT_004)
+POST {{baseUrl}}/shifts HTTP/1.1
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "name": "Ca Chiều Muộn (Tiết 7 - 9)",
+  "startTime": "15:00",
+  "endTime": "18:00",
+  "lateThresholdMinutes": 15
+}
+
+### 18. Cập nhật cấu hình ca làm việc
+PUT {{baseUrl}}/shifts/{{shiftId}} HTTP/1.1
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "lateThresholdMinutes": 20
+}
+
+### 19. [Case 3: Test Lỗi] Thử xóa ca đang có lịch dạy liên kết (Kỳ vọng: 400 Bad Request, Mã SHIFT_002)
+# Ca Sáng mẫu đang được phân lịch giảng dạy cho GV Bích
+DELETE {{baseUrl}}/shifts/{{shiftId}} HTTP/1.1
+Authorization: Bearer {{token}}
+
+### 20. Danh sách lịch giảng dạy/công tác (Lọc theo học kỳ & có phân quyền)
+GET {{baseUrl}}/schedules?startDate=2026-01-01&endDate=2026-12-31 HTTP/1.1
+Authorization: Bearer {{token}}
+
+### 20b. Danh sách lịch có phân trang (page=1, limit=2)
+GET {{baseUrl}}/schedules?page=1&limit=2 HTTP/1.1
+Authorization: Bearer {{token}}
+
+### 21. Chi tiết một lịch cụ thể (Populate giảng viên và ca)
+GET {{baseUrl}}/schedules/{{scheduleId}} HTTP/1.1
+Authorization: Bearer {{token}}
+
+### 22. [Case 4: Thành công] Tạo lịch học kỳ chuẩn (Tự động kế thừa startTime, endTime từ Ca)
+# @name createNewSchedule
+POST {{baseUrl}}/schedules HTTP/1.1
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "userId": "{{userId}}",
+  "shiftId": "{{shiftId}}",
+  "roomId": "Giảng đường B3-401",
+  "weekday": 2,
+  "isRecurring": true,
+  "startDate": "2026-01-15T00:00:00.000Z",
+  "endDate": "2026-12-31T23:59:59.000Z"
+}
+
+### 22b. [Case 5: Test Lỗi] Thử tạo lịch trùng giờ cùng thứ cho giảng viên (Kỳ vọng: 409 Conflict, Mã SCHEDULE_002)
+POST {{baseUrl}}/schedules HTTP/1.1
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "userId": "{{userId}}",
+  "shiftId": "{{shiftId}}",
+  "roomId": "Phòng thực hành Lab-02",
+  "weekday": 2,
+  "isRecurring": true,
+  "startDate": "2026-02-01T00:00:00.000Z",
+  "endDate": "2026-06-30T23:59:59.000Z"
+}
+
+### 22c. [Case 6: Test Lỗi] Thử tạo lịch có endDate < startDate (Kỳ vọng: 400 Bad Request, Mã SCHEDULE_003)
+POST {{baseUrl}}/schedules HTTP/1.1
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "userId": "{{userId}}",
+  "shiftId": "{{shiftId}}",
+  "roomId": "Phòng Hội Thảo",
+  "weekday": 4,
+  "startDate": "2026-12-31T00:00:00.000Z",
+  "endDate": "2026-01-01T00:00:00.000Z"
+}
+
+### 23. Cập nhật lịch (Gia hạn học kỳ / đổi phòng học)
+PUT {{baseUrl}}/schedules/{{scheduleId}} HTTP/1.1
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "roomId": "Giảng đường B3-502"
+}
+
+### 24. Xóa lịch phân công
+DELETE {{baseUrl}}/schedules/{{scheduleId}} HTTP/1.1
+Authorization: Bearer {{token}}
+
+### ------------------------------------------------------------------------------
+### ------------------------------------------------------------------------------
+### 3.4 ATTENDANCE (TV B) - BỘ KIỂM THỬ 6 TEST CASES TOÀN DIỆN
+### ------------------------------------------------------------------------------
+
+### TC01. [Thành công] Giảng viên Check-in tự động nhận diện ca theo lịch (Kỳ vọng: 201 Created, status ON_TIME)
+# Lưu ý: Đăng nhập bằng tài khoản Giảng viên (loginLecturer ở mục 2c) trước khi bấm
+POST {{baseUrl}}/attendance/check-in HTTP/1.1
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "method": "qr",
+  "deviceId": "KIOSK_GATE_A2",
+  "location": {
+    "lat": 21.028511,
+    "lng": 105.854167
+  }
+}
+
+### TC01b. [Thành công] Check-in thủ công chỉ định ca (shiftId & method: manual)
+POST {{baseUrl}}/attendance/check-in HTTP/1.1
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "shiftId": "{{shiftId}}",
+  "method": "manual",
+  "deviceId": "WEB_PORTAL",
+  "location": {
+    "lat": 21.028511,
+    "lng": 105.854167
+  }
+}
+
+### TC02. [Test Lỗi] Check-in ngoài khung ca hoặc không có lịch dạy hôm nay (Kỳ vọng: 400 Bad Request, Mã ATTENDANCE_004)
+# Thực hiện khi ngoài khung [startTime - 30p, endTime] hoặc dùng tài khoản nhân sự không có lịch hôm nay
+POST {{baseUrl}}/attendance/check-in HTTP/1.1
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "method": "gps",
+  "deviceId": "MOBILE_APP_01",
+  "location": {
+    "lat": 21.028511,
+    "lng": 105.854167
+  }
+}
+
+### TC03. [Test Lỗi] Bấm Check-in lần 2 trong cùng 1 ca hôm nay (Kỳ vọng: 409 Conflict, Mã ATTENDANCE_002)
+# Bấm lại ngay sau khi TC01 đã check-in thành công
+POST {{baseUrl}}/attendance/check-in HTTP/1.1
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "method": "face",
+  "deviceId": "KIOSK_GATE_A2"
+}
+
+### TC04. [Thành công] Check-out ca đang mở hôm nay (Kỳ vọng: 200 OK, cập nhật checkOutTime & tính workingDuration)
+# Backend tự tìm ca mở của chính user hôm nay, không cần truyền ID
+POST {{baseUrl}}/attendance/check-out HTTP/1.1
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{}
+
+### TC05. [Test Lỗi] Check-out khi chưa từng Check-in hoặc không còn ca mở (Kỳ vọng: 404 Not Found, Mã ATTENDANCE_003)
+# Bấm lại ngay sau TC04 (khi ca đã đóng) hoặc dùng tài khoản chưa từng check-in hôm nay
+POST {{baseUrl}}/attendance/check-out HTTP/1.1
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{}
+
+### TC06. [Thành công] Admin can thiệp sửa log chấm công (Kỳ vọng: 200 OK, isManualOverride: true, ghi audit_logs)
+# Đăng nhập Admin (loginAdmin ở mục 2a) lấy token rồi thực hiện
+PUT {{baseUrl}}/attendance/{{attendanceId}} HTTP/1.1
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "status": "ON_TIME",
+  "checkInTime": "2026-09-11T07:05:00.000Z"
+}
+
+### TC06b. [Kiểm tra DB/Audit] Kiểm tra nhật ký kiểm toán sau khi Admin can thiệp (Kỳ vọng: 200 OK, thấy action EDIT_ATTENDANCE)
+GET {{baseUrl}}/audit-logs?action=EDIT_ATTENDANCE HTTP/1.1
+Authorization: Bearer {{token}}
+
+### 27a. Lịch sử chấm công (Giảng viên / Nhân viên tự động ép lọc chỉ thấy của chính mình)
+GET {{baseUrl}}/attendance/history?page=1&limit=20 HTTP/1.1
+Authorization: Bearer {{token}}
+
+### 27b. Lịch sử chấm công (Admin lọc toàn trường theo status, from, to và phân trang)
+GET {{baseUrl}}/attendance/history?status=ON_TIME&from=2026-01-01&to=2026-12-31&page=1&limit=10 HTTP/1.1
+Authorization: Bearer {{token}}
+
+### 28a. Xem chi tiết một bản ghi chấm công (Phân quyền: GV/NV xem chính mình, TK xem khoa mình, Admin xem tất cả)
+GET {{baseUrl}}/attendance/{{attendanceId}} HTTP/1.1
+Authorization: Bearer {{token}}
+
+### 28b. [Test Lỗi] Giảng viên cố tình xem bản ghi của người khác (Kỳ vọng: 403 Forbidden)
+GET {{baseUrl}}/attendance/{{attendanceId}} HTTP/1.1
+Authorization: Bearer {{token}}
+
+### 29b. [Test Lỗi] Giảng viên cố tình gọi PUT sửa log chấm công (Kỳ vọng: 403 Forbidden)
+PUT {{baseUrl}}/attendance/{{attendanceId}} HTTP/1.1
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "status": "ON_TIME"
+}
+
+### ==============================================================================
+### TUẦN 4 - KIỂM THỬ TOÀN DIỆN 5 CA NGHIỆP VỤ BIÊN (TC07 - TC11)
+### ==============================================================================
+
+### TC07. [Thành công] Giảng viên có lịch hôm nay nhưng không check-in -> Kích hoạt Cron -> Nhận trạng thái ABSENT
+# Đăng nhập Admin trước, sau đó kích hoạt trigger-absent-cron
+# Kỳ vọng: 200 OK, newlyMarkedAbsent >= 1
+POST {{baseUrl}}/attendance/trigger-absent-cron HTTP/1.1
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "date": "2026-09-15"
+}
+
+### TC08. [Thành công] Giảng viên có đơn xin nghỉ phép đã duyệt (EXCUSED_ABSENCE) -> Kích hoạt Cron -> Không bị đè thành ABSENT
+# Kỳ vọng: 200 OK, giữ nguyên EXCUSED_ABSENCE không bị đè thành ABSENT
+POST {{baseUrl}}/attendance/trigger-absent-cron HTTP/1.1
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "date": "2026-09-15"
+}
+
+### TC09. [Thành công] Giảng viên đã check-in đúng giờ (ON_TIME) -> Kích hoạt Cron -> Giữ nguyên ON_TIME
+# Kỳ vọng: 200 OK, ca đã check-in được tính vào alreadyAttended, không bị đổi thành ABSENT
+POST {{baseUrl}}/attendance/trigger-absent-cron HTTP/1.1
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "date": "2026-09-15"
+}
+
+### TC10. [Thành công] Chạy lại Cron lần 2 trong cùng một ngày -> Xác nhận không sinh bản ghi trùng lặp (Idempotent PASS)
+# Kỳ vọng: 200 OK, newlyMarkedAbsent = 0, alreadyAttended = tổng số ca đã xử lý (không sinh bản ghi trùng lặp)
+POST {{baseUrl}}/attendance/trigger-absent-cron HTTP/1.1
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "date": "2026-09-15"
+}
+
+### TC11. [Bảo mật] Tài khoản không phải Admin (Giảng viên / Nhân viên) cố tình gọi trigger Cron -> Trả về 403 Forbidden
+# Đăng nhập bằng tài khoản Giảng viên (loginLecturer ở mục 2c) rồi bấm request này
+# Kỳ vọng: 403 Forbidden
+POST {{baseUrl}}/attendance/trigger-absent-cron HTTP/1.1
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "date": "2026-09-15"
+}
+
+### ------------------------------------------------------------------------------
+### 3.5 LEAVE REQUEST (TV C)
+### ------------------------------------------------------------------------------
+
+### 30. Tạo đơn xin nghỉ phép / dạy bù / đổi ca
+POST {{baseUrl}}/leave-requests HTTP/1.1
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "type": "nghi_phep",
+  "reason": "Đi công tác tham dự hội thảo tại TP. Hồ Chí Minh",
+  "startDate": "2026-11-10T00:00:00.000Z",
+  "endDate": "2026-11-12T23:59:59.000Z",
+  "attachmentUrl": "https://storage.university.edu.vn/attachments/giay-di-duong.pdf"
+}
+
+### 30b. Upload file minh chứng thực tế (Multer multipart/form-data)
+POST {{baseUrl}}/upload HTTP/1.1
+Authorization: Bearer {{token}}
+Content-Type: multipart/form-data; boundary=----WebKitFormBoundary7MA4YWxkTrZu0gW
+
+------WebKitFormBoundary7MA4YWxkTrZu0gW
+Content-Disposition: form-data; name="file"; filename="giay_kham_benh.pdf"
+Content-Type: application/pdf
+
+< ./scratch_test_medical_report.pdf
+------WebKitFormBoundary7MA4YWxkTrZu0gW--
+
+### 31. Danh sách đơn xin nghỉ phép
+GET {{baseUrl}}/leave-requests?status=PENDING HTTP/1.1
+Authorization: Bearer {{token}}
+
+### 32. Chi tiết một đơn xin nghỉ
+GET {{baseUrl}}/leave-requests/{{leaveId}} HTTP/1.1
+Authorization: Bearer {{token}}
+
+### 33. Phê duyệt đơn xin nghỉ (Dành cho Trưởng Khoa / Admin)
+PUT {{baseUrl}}/leave-requests/{{leaveId}}/approve HTTP/1.1
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{}
+
+### 34. Từ chối đơn xin nghỉ (BẮT BUỘC có rejectionReason)
+PUT {{baseUrl}}/leave-requests/{{leaveId}}/reject HTTP/1.1
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "rejectionReason": "Trùng lịch thi kết thúc học phần, đề nghị giảng viên sắp xếp dời lịch."
+}
+
+### 35. Xem số ngày phép còn lại (Leave Balance - Tính động qua Aggregation)
+GET {{baseUrl}}/leave-requests/balance HTTP/1.1
+Authorization: Bearer {{token}}
+
+### ------------------------------------------------------------------------------
+### 3.6 AUDIT LOG (TV A / TV C)
+### ------------------------------------------------------------------------------
+
+### 36. Tra cứu nhật ký kiểm toán hệ thống (Dành riêng cho Admin)
+GET {{baseUrl}}/audit-logs HTTP/1.1
+Authorization: Bearer {{token}}
+
+### ------------------------------------------------------------------------------
+### 3.7 BÁO CÁO THỐNG KÊ (TV C)
+### ------------------------------------------------------------------------------
+
+### 37. Báo cáo thống kê chấm công và ngày nghỉ phép (Cá nhân / Khoa / Toàn trường)
+GET {{baseUrl}}/reports/attendance?from=2026-01-01&to=2026-12-31 HTTP/1.1
+Authorization: Bearer {{token}}
+
+### 38. Báo cáo tổng hợp chi tiết theo tháng (Dành cho Admin / Trưởng Khoa)
+GET {{baseUrl}}/reports/monthly?month=10&year=2026 HTTP/1.1
+Authorization: Bearer {{token}}
